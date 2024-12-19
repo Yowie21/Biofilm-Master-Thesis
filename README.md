@@ -1,5 +1,5 @@
 # General information
-This repository contains some of the code that I wrote as part of my master thesis. It will be updated regularly until the thesis is finished.
+This repository contains some of the code that I wrote as part of my master thesis. It will be updated regularly until the thesis is finished. For questions, don't hesitate to send me and email at joiegeurts@gmail.com.
 
 # Growing biofilms
 The subject of the thesis (and hence the code) is the modelling and numerical simulation of the growth of biofilms. Details may be found in the [thesis proposal](Proposal.pdf).
