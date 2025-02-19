@@ -17,7 +17,7 @@ real zeta = 0.01;  // Nitrogen loss rate
 
 
 // Model functions
-func real f(real v) { return v/(kappa+v) - lambda; }
+func real f(real v) { return v/(kappa+v); }
 
 func real Phi(real u) {
     if (u <= 0) {
@@ -86,13 +86,13 @@ func F = [-1, 0, -2];
 
 
 //Initial conditions
-func M0 = exp(-50*(x^2+y^2));
+func M0 = exp(-50*((x-0.3)^2+(y-0.3)^2)) + exp(-50*((x+0.3)^2+(y+0.3)^2));
 func N0 = 0.0;
 
 
 // Discretisation parameters
 real dt = 1e-2;  // Temporal discretisation parameter
-int numSteps = 10;  // Number of timesteps
+int numSteps = 1000;  // Number of timesteps
 int Nc = 60;  // Number of nodes on the circular boundary
 int Nz = 30;  // Number of nodes in the z direction
 real K = 1e12;  // Dirichlet conformity parameter
@@ -100,7 +100,7 @@ real K = 1e12;  // Dirichlet conformity parameter
 
 // Linearisation parameters
 real M = 0.01;  // Value of M in the M-scheme
-int maxIter = 30;  // Maximum number of iterations for the stopping criterion
+int maxIter = 50;  // Maximum number of iterations for the stopping criterion
 real errorTol = 1e-6;  // Error tolerance for the stopping criterion
 
 
@@ -148,9 +148,9 @@ macro plotSolutions() {
 } // Plot solutions directly using FreeFEM (or at least that's what it should be doing)
 
 macro saveSolutions() {
-    savevtk("Master Thesis/data/Biofilm.vtu", Ths, Mh, append=true);
-    savevtk("Master Thesis/data/Nitrogen.vtu", Thb, Nh, append=true);
-    savevtk("Master Thesis/data/Flux.vtu", Thb, [Ph1, Ph2, Ph3], append=true);
+    savevtk("data/Biofilm.vtu", Ths, Mh, append=true, dataname="v");
+    savevtk("data/Nitrogen.vtu", Thb, Nh, append=true, dataname="u");
+    savevtk("data/Flux.vtu", Thb, [Ph1, Ph2, Ph3], append=true, dataname="grad(u)");
 } // Save solutions to vtu files
 
 
@@ -168,12 +168,12 @@ int3d(Thb)((1 + zeta * dt) * Nh * xi)
 - int2d(Thb, top)(K * exp(-10*(x^2+y^2)) * [chi1, chi2, chi3] '* N);
 
 problem Biofilm([wh, sh], [phi, psi]) =
-int2d(Ths)((1 - dt * f(Nold)) * Lb(sprev) * sh * phi)
+int2d(Ths)((1 - dt * (f(Nold) - lambda)) * Lb(sprev) * sh * phi)
 + int2d(Ths)(dt * grad(wh) '* grad(phi))
-+ int2d(Ths)((1 - dt * f(Nold)) * Lb(sprev) * (LB(sprev) * sh - wh) * psi)
++ int2d(Ths)((1 - dt * (f(Nold) - lambda)) * Lb(sprev) * (LB(sprev) * sh - wh) * psi)
 - int2d(Ths)(Mold * phi)
-- int2d(Ths)((1 - dt * f(Nold)) * (Lb(sprev) * sprev - b(sprev)) * phi)
-- int2d(Ths)((1 - dt * f(Nold)) * Lb(sprev) * (LB(sprev) * sprev - B(sprev)) * psi)
+- int2d(Ths)((1 - dt * (f(Nold) - lambda)) * (Lb(sprev) * sprev - b(sprev)) * phi)
+- int2d(Ths)((1 - dt * (f(Nold) - lambda)) * Lb(sprev) * (LB(sprev) * sprev - B(sprev)) * psi)
 + on(C, wh = 0);
 
 
