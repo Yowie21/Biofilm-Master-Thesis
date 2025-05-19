@@ -1,0 +1,244 @@
+load "msh3"
+
+verbosity = 0;
+
+
+// Simulation parameters
+real lambda = 0.01;  // Nitrogen loss rate
+real mu = 0.4;  // Reaction rate coefficient
+real kappa = 0.01;  // Reaction rate growth rate
+real eta = 0.42;  // Bacterial death rate
+
+real m = 1.5;
+
+
+// Model functions
+func real r(real v) { return v/(kappa+v); }
+
+// Diffusion function
+func real Phi(real u) {
+	if (u <= 0) {
+		return 0;
+	} else {
+		return u^m;
+	}
+}
+
+func real Phiprime(real u) {
+	if (u <= 0) {
+		return 0;
+	} else {
+		return m * u^(m-1);
+	}
+}
+
+func real Phiprimeprime(real u) {
+	if (u <= 0) {
+		return 0;
+	} else {
+		return m * (m-1) * u^(m-2);
+	}
+}
+
+func real b(real s) {
+	if (s < 0) {
+		return 0;
+	} else if (s <= m^(1/(1-m))) {
+		return s;
+	} else {
+		return (s + m^(m/(1-m)) - m^(1/(1-m)))^(1/m);
+	}
+}
+
+func real bprime(real s) {
+	if (s < 0) {
+		return 0;
+	} else if (s <= m^(1/(1-m))) {
+		return 1;
+	} else {
+		return (1/m) * (s + m^(m/(1-m)) - m^(1/(1-m)))^((1-m)/m);
+	}
+}
+
+func real binv(real w) {
+	if (w < 0) {
+		return 0;
+	} else if (w <= m^(1/(1-m))) {
+		return w;
+	} else {
+		return w^m + m^(m/(1-m)) - m^(1/(1-m));
+	}
+}
+
+func real B(real s) {
+	if (s < 0) {
+		return s;
+	} else if (s <= m^(1/(1-m))) {
+		return s^m;
+	} else {
+		return s + m^(m/(1-m)) - m^(1/(1-m));
+	}
+}
+
+func real Bprime(real s) {
+	if (s < 0) {
+		return 1;
+	} else if (s <= m^(1/(1-m))) {
+		return m * s^(m-1);
+	} else {
+		return 1;
+	}
+}
+
+func real Binv(real w) {
+	if (w < 0) {
+		return w;
+	} else if (w <= m^(m/(1-m))) {
+		return w^(1/m);
+	} else {
+		return w - m^(m/(1-m)) + m^(1/(1-m));
+	}
+}
+
+// Bulk velocity field
+func F = [0, 0];
+
+
+// Discretisation parameters
+real dt = 1e-2;  // Temporal discretisation parameter
+
+
+//Initial conditions
+func N1 = 0.5 + mu/pi * r(0.5*(1+lambda*dt)) * sin(pi*x)^2 * sin(0.5*pi*y);
+func N0 = 0.5*(1+lambda*dt) - mu * r(0.5*(1+lambda*dt)) * (2*pi*dt - (4.25*pi*dt + (1+lambda*dt)/pi) * sin(pi*x)^2) * sin(0.5*pi*y);
+func M1 = 0.5 * sin(pi*x)^2;  // Biofilm density at t=dt
+func M0 = (1 + dt * (eta - r(N0(x,0.0)))) * M1 - pi^2 * dt * (0.25 * Phiprimeprime(M1) * sin(2*pi*x)^2 + Phiprime(M1) * cos(2*pi*x));  // Inferred biofilm density at t=0
+
+func DxN = mu * r(0.5*(1+lambda*dt)) * sin(2*pi*x) * sin(0.5*pi*y);
+func DyN = 0.5 * mu * r(0.5*(1+lambda*dt)) * sin(pi*x)^2 * cos(0.5*pi*y);
+
+func DxxN = 2 * pi * mu * r(0.5*(1+lambda*dt)) * cos(2*pi*x) * sin(0.5*pi*y);
+func DyyN = - 0.25 * pi * mu * r(0.5*(1+lambda*dt)) * sin(pi*x)^2 * sin(0.5*pi*y);
+func DxxPhiM = 0.25 * pi^2 * Phiprimeprime(M1) * sin(2*pi*x)^2 + pi^2 * Phiprime(M1) * cos(2*pi*x);
+
+// Linearisation parameters
+real L = 1.5;  // Value of ML in the M-scheme
+real M = 1e-3;  // Value of M in the M-scheme
+int maxIter = 100;  // Maetamum number of iterations for the stopping criterion
+real errorTol = 1e-6;  // Error tolerance for the stopping criterion
+
+
+// The linearisation coefficients
+func real Lb(real s) { return min(L, max(bprime(s) + M*dt, 2*M*dt)); }
+func real LB(real s) { return min(L, max(Bprime(s) + M*dt, 2*M*dt)); }
+
+
+// Useful macros
+macro grad(v) [dx(v), dy(v)]// Gradient operator
+macro div(v) (dx(v#1) + dy(v#2))// Divergence operator
+
+// Grid resolutions to test (resolution N means N triangles along each edge of the square grid
+//                                              resulting in approx. 2*N*N triangles and h ≈ 2√2/N)
+int[int] Nss = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200];
+
+for (int j = 0; j < Nss.n; j++) {
+	int nbN = Nss[j];
+
+	// Domain definition and mesh generation
+	mesh Thb = square(2, 2);
+	real h = 1.0/nbN;
+	for(int i = 0; i <= 10; i++) {
+		Thb = adaptmesh(Thb, h, IsMetric=true, nbvx=2*nbN*nbN);  // This is here to make sure the mesh isn't axis-aligned
+	}
+	int[int] surface = [1];
+	int[int] notsurface = [2, 3, 4];
+	int[int] top = [3];
+	meshL Ths = extract(Thb, label=surface);
+
+	// Finite element spaces and functions
+	fespace Us(Ths, P0);
+	fespace Vs(Ths, [P1, P0]);
+	fespace Ub(Thb, P0);
+	fespace Vb(Thb, P1);
+
+	Us Mh = M0;
+	Us Mold = M0;
+	Vs [wh, sh] = [Phi(Mh), binv(Mh)], [phi, psi];
+	Vs [wprev, sprev] = [Phi(Mh), binv(Mh)];
+
+	Vb Nh = N0, xi;
+	Vb Nold = N0;
+	Vb Fh1 = F[0], Fh2 = F[1];
+	Ub Noldproj = N0, chi;
+
+
+	// Variational forms of the coupled IBVPs
+	problem L2Project(Noldproj, chi) =
+	int2d(Thb)(Noldproj * chi)
+	- int2d(Thb)(N0 * chi);
+
+	problem Nitrogen(Nh, xi) =
+	int2d(Thb)((1 + lambda * dt) * Nh * xi)
+	+ int2d(Thb)(dt * grad(Nh) '* grad(xi))
+	+ int2d(Thb)(dt * Nh * [Fh1, Fh2] '* grad(xi))
+	- int2d(Thb)(Nold * xi)
+	+ int1d(Thb, surface)(mu * dt * r(Noldproj) * Mh * xi);
+
+	problem Biofilm([wh, sh], [phi, psi]) =
+	int1d(Ths)((1 + dt * (eta - r(Noldproj))) * Lb(sprev) * sh * phi)
+	+ int1d(Ths)(dt * dx(wh) * dx(phi))
+	- int1d(Ths)(Mold * phi)
+	- int1d(Ths)((1 + dt * (eta - r(Noldproj))) * (Lb(sprev) * sprev - b(sprev)) * phi)
+	+ int1d(Ths)((1 + dt * (eta - r(Noldproj))) * Lb(sprev) * (LB(sprev) * sh - wh) * psi)
+	- int1d(Ths)((1 + dt * (eta - r(Noldproj))) * Lb(sprev) * (LB(sprev) * sprev - B(sprev)) * psi)
+	+ on(1, 2, wh = 0);
+
+
+	// Iteration variables
+	int it = 0;  // Current iteration index
+	real linError;  // Current linearisation error
+	int paramDiv = false;  // Divergence flag
+
+	L2Project;
+
+	linError = 1;
+	it = 0;
+
+	while (it < maxIter && linError > errorTol) {  // Stopping criterion
+		it++;
+
+		// Solve the biofilm equation
+		Biofilm;
+
+		// Compute the current linearisation error
+		linError = sqrt(int1d(Ths)(Lb(sprev) * LB(sprev) * (sh-sprev)^2 + dt * (grad(wh) - grad(wprev)) '* (grad(wh) - grad(wprev))));
+
+		if (verbosity > 1) cout << endl << "Linearisation error after iteration " << it << " is " << linError << endl;
+
+		// Update the solutions
+		Mh = Lb(sprev) * (sh - sprev) + b(sprev);
+		[wprev, sprev] = [wh, sh];
+
+		if (linError > 100) {
+			paramDiv = true;
+			break;
+		}
+	}
+
+	if (verbosity > 0) {
+		if (linError <= errorTol) {
+			cout << "Linearisation scheme converged after " << it << " iterations" << endl << endl;
+		} else {
+			cout << "Linearisation scheme did not converge after " << it << " iterations, continuing..." << endl << endl;
+		}
+	}
+
+	// Solve the nitrogen equation
+	Nitrogen;
+
+	real errU = sqrt(int2d(Thb)((Nh - N1)^2 + (grad(Nh) - [DxN, DyN]) '* (grad(Nh) - [DxN, DyN])));
+	real errV = sqrt(int1d(Ths)((Mh - M1)^2));
+	real errW = sqrt(int1d(Ths)((dx(wh) - 0.5 * pi * Phiprime(M1) * sin(2*pi*x))^2));
+	real errS = sqrt(int1d(Ths)((sh - Binv(Phi(M1)))^2));
+	cout << Thb.hmax << " " << errU << " " << errV << " " << errW << " " << errS << endl;
+}
