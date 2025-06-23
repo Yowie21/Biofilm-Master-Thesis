@@ -1,21 +1,19 @@
 load "msh3"
 
-verbosity = 0;
+verbosity = 0;  // Controls the level of debug information printed
 
 
 // Simulation parameters
-real lambda = 0.01;  // Nitrogen loss rate
 real mu = 0.4;  // Reaction rate coefficient
-real kappa = 0.01;  // Reaction rate growth rate
+real kappa = 0.01;  // Half-saturation constant
+real lambda = 0.01;  // Nitrogen loss rate
 real eta = 0.42;  // Bacterial death rate
-
-real m = 1.5;
+real m = 4.0;  // PME exponent
 
 
 // Model functions
 func real r(real v) { return v/(kappa+v); }
 
-// Diffusion function
 func real Phi(real u) {
 	if (u <= 0) {
 		return 0;
@@ -40,6 +38,7 @@ func real Phiprimeprime(real u) {
 	}
 }
 
+// Double splitting functions
 func real b(real s) {
 	if (s < 0) {
 		return 0;
@@ -57,16 +56,6 @@ func real bprime(real s) {
 		return 1;
 	} else {
 		return (1/m) * (s + m^(m/(1-m)) - m^(1/(1-m)))^((1-m)/m);
-	}
-}
-
-func real binv(real w) {
-	if (w < 0) {
-		return 0;
-	} else if (w <= m^(1/(1-m))) {
-		return w;
-	} else {
-		return w^m + m^(m/(1-m)) - m^(1/(1-m));
 	}
 }
 
@@ -100,49 +89,48 @@ func real Binv(real w) {
 	}
 }
 
+
 // Bulk velocity field
-func F = [0, 0];
+func q = [0.0, 0.0];
 
 
 // Discretisation parameters
 real dt = 1e-2;  // Temporal discretisation parameter
 
 
-//Initial conditions
-func N1 = 0.5 + mu/pi * r(0.5*(1+lambda*dt)) * sin(pi*x)^2 * sin(0.5*pi*y);
-func N0 = 0.5*(1+lambda*dt) - mu * r(0.5*(1+lambda*dt)) * (2*pi*dt - (4.25*pi*dt + (1+lambda*dt)/pi) * sin(pi*x)^2) * sin(0.5*pi*y);
-func M1 = 0.5 * sin(pi*x)^2;  // Biofilm density at t=dt
-func M0 = (1 + dt * (eta - r(N0(x,0.0)))) * M1 - pi^2 * dt * (0.25 * Phiprimeprime(M1) * sin(2*pi*x)^2 + Phiprime(M1) * cos(2*pi*x));  // Inferred biofilm density at t=0
+//Initial conditions and final conditions
+func u1 = 1.0 + 2*mu/pi * r(1+lambda*dt) * sin(pi*x)^2 * sin(0.5*pi*y);
+func u0 = 1 + lambda*dt + 2*mu/pi * r(1+lambda*dt) * ((1 + (lambda + 4.25 * pi^2) * dt) * sin(pi*x)^2 - 2 * pi^2 * dt) * sin(0.5*pi*y);
+func v1 = sin(pi*x)^2;
+func v0 = (1 + dt * (eta - r(1+lambda*dt))) * v1 - pi^2 * dt * (Phiprimeprime(v1) * sin(2*pi*x)^2 + 2 * Phiprime(v1) * cos(2*pi*x));
 
-func DxN = mu * r(0.5*(1+lambda*dt)) * sin(2*pi*x) * sin(0.5*pi*y);
-func DyN = 0.5 * mu * r(0.5*(1+lambda*dt)) * sin(pi*x)^2 * cos(0.5*pi*y);
-
-func DxxN = 2 * pi * mu * r(0.5*(1+lambda*dt)) * cos(2*pi*x) * sin(0.5*pi*y);
-func DyyN = - 0.25 * pi * mu * r(0.5*(1+lambda*dt)) * sin(pi*x)^2 * sin(0.5*pi*y);
-func DxxPhiM = 0.25 * pi^2 * Phiprimeprime(M1) * sin(2*pi*x)^2 + pi^2 * Phiprime(M1) * cos(2*pi*x);
+func dxu = 2*mu * r(1+lambda*dt) * sin(2*pi*x) * sin(0.5*pi*y);
+func dyu = mu * r(1+lambda*dt) * sin(pi*x)^2 * cos(0.5*pi*y);
 
 // Linearisation parameters
-real L = 1.5;  // Value of ML in the M-scheme
-real M = 1e-3;  // Value of M in the M-scheme
-int maxIter = 100;  // Maetamum number of iterations for the stopping criterion
+real L = 1.5;  // Value of L in the M-scheme
+real ML = 1e-3;  // Value of ML in the M-scheme
+int maxIter = 100;  // Maximum number of iterations for the stopping criterion
 real errorTol = 1e-6;  // Error tolerance for the stopping criterion
 
 
 // The linearisation coefficients
-func real Lb(real s) { return min(L, max(bprime(s) + M*dt, 2*M*dt)); }
-func real LB(real s) { return min(L, max(Bprime(s) + M*dt, 2*M*dt)); }
+func real Lb(real s) { return min(L, max(bprime(s) + ML*dt, 2*ML*dt)); }
+func real LB(real s) { return min(L, max(Bprime(s) + ML*dt, 2*ML*dt)); }
 
 
 // Useful macros
 macro grad(v) [dx(v), dy(v)]// Gradient operator
-macro div(v) (dx(v#1) + dy(v#2))// Divergence operator
+
 
 // Grid resolutions to test (resolution N means N triangles along each edge of the square grid
-//                                              resulting in approx. 2*N*N triangles and h ≈ 2√2/N)
+//                                              resulting in approx. 2*N*N triangles and $h \approx 2\sqrt{2}/N$)
 int[int] Nss = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200];
 
+cout << "h -- u error -- v error -- w error -- s error" << endl;
 for (int j = 0; j < Nss.n; j++) {
 	int nbN = Nss[j];
+
 
 	// Domain definition and mesh generation
 	mesh Thb = square(2, 2);
@@ -155,42 +143,43 @@ for (int j = 0; j < Nss.n; j++) {
 	int[int] top = [3];
 	meshL Ths = extract(Thb, label=surface);
 
+
 	// Finite element spaces and functions
-	fespace Us(Ths, P0);
-	fespace Vs(Ths, [P1, P0]);
-	fespace Ub(Thb, P0);
-	fespace Vb(Thb, P1);
+	fespace P0s(Ths, P0);
+	fespace Vh(Ths, [P1, P0]);
+	fespace P0b(Thb, P0);
+	fespace Uh(Thb, P1);
 
-	Us Mh = M0;
-	Us Mold = M0;
-	Vs [wh, sh] = [Phi(Mh), binv(Mh)], [phi, psi];
-	Vs [wprev, sprev] = [Phi(Mh), binv(Mh)];
+	P0s vh = v0;
+	P0s vold = v0;
+	Vh [wh, sh] = [Phi(vh), Binv(Phi(vh))], [phi, psi];
+	Vh [wprev, sprev] = [Phi(vh), Binv(Phi(vh))];
 
-	Vb Nh = N0, xi;
-	Vb Nold = N0;
-	Vb Fh1 = F[0], Fh2 = F[1];
-	Ub Noldproj = N0, chi;
+	Uh uh = u0, xi;
+	Uh uold = u0;
+	Uh qh1 = q[0], qh2 = q[1];
+	P0b uoldproj = u0, chi;
 
 
 	// Variational forms of the coupled IBVPs
-	problem L2Project(Noldproj, chi) =
-	int2d(Thb)(Noldproj * chi)
-	- int2d(Thb)(N0 * chi);
+	problem L2Project(uoldproj, chi) =
+	int2d(Thb)(uoldproj * chi)
+	- int2d(Thb)(u0 * chi);
 
-	problem Nitrogen(Nh, xi) =
-	int2d(Thb)((1 + lambda * dt) * Nh * xi)
-	+ int2d(Thb)(dt * grad(Nh) '* grad(xi))
-	+ int2d(Thb)(dt * Nh * [Fh1, Fh2] '* grad(xi))
-	- int2d(Thb)(Nold * xi)
-	+ int1d(Thb, surface)(mu * dt * r(Noldproj) * Mh * xi);
+	problem Nitrogen(uh, xi) =
+	int2d(Thb)((1 + lambda * dt) * uh * xi)
+	+ int2d(Thb)(dt * grad(uh) '* grad(xi))
+	+ int2d(Thb)(dt * uh * [qh1, qh2] '* grad(xi))
+	- int2d(Thb)(uold * xi)
+	+ int1d(Thb, surface)(mu * dt * r(uoldproj) * vh * xi);
 
 	problem Biofilm([wh, sh], [phi, psi]) =
-	int1d(Ths)((1 + dt * (eta - r(Noldproj))) * Lb(sprev) * sh * phi)
+	int1d(Ths)((1 + dt * (eta - r(uoldproj))) * Lb(sprev) * sh * phi)
 	+ int1d(Ths)(dt * dx(wh) * dx(phi))
-	- int1d(Ths)(Mold * phi)
-	- int1d(Ths)((1 + dt * (eta - r(Noldproj))) * (Lb(sprev) * sprev - b(sprev)) * phi)
-	+ int1d(Ths)((1 + dt * (eta - r(Noldproj))) * Lb(sprev) * (LB(sprev) * sh - wh) * psi)
-	- int1d(Ths)((1 + dt * (eta - r(Noldproj))) * Lb(sprev) * (LB(sprev) * sprev - B(sprev)) * psi)
+	- int1d(Ths)(vold * phi)
+	- int1d(Ths)((1 + dt * (eta - r(uoldproj))) * (Lb(sprev) * sprev - b(sprev)) * phi)
+	+ int1d(Ths)((1 + dt * (eta - r(uoldproj))) * Lb(sprev) * (LB(sprev) * sh - wh) * psi)
+	- int1d(Ths)((1 + dt * (eta - r(uoldproj))) * Lb(sprev) * (LB(sprev) * sprev - B(sprev)) * psi)
 	+ on(1, 2, wh = 0);
 
 
@@ -207,7 +196,7 @@ for (int j = 0; j < Nss.n; j++) {
 	while (it < maxIter && linError > errorTol) {  // Stopping criterion
 		it++;
 
-		// Solve the biofilm equation
+		// Solve the surface equation
 		Biofilm;
 
 		// Compute the current linearisation error
@@ -216,7 +205,7 @@ for (int j = 0; j < Nss.n; j++) {
 		if (verbosity > 1) cout << endl << "Linearisation error after iteration " << it << " is " << linError << endl;
 
 		// Update the solutions
-		Mh = Lb(sprev) * (sh - sprev) + b(sprev);
+		vh = Lb(sprev) * (sh - sprev) + b(sprev);
 		[wprev, sprev] = [wh, sh];
 
 		if (linError > 100) {
@@ -233,12 +222,13 @@ for (int j = 0; j < Nss.n; j++) {
 		}
 	}
 
-	// Solve the nitrogen equation
+	// Solve the bulk equation
 	Nitrogen;
 
-	real errU = sqrt(int2d(Thb)((Nh - N1)^2 + (grad(Nh) - [DxN, DyN]) '* (grad(Nh) - [DxN, DyN])));
-	real errV = sqrt(int1d(Ths)((Mh - M1)^2));
-	real errW = sqrt(int1d(Ths)((dx(wh) - 0.5 * pi * Phiprime(M1) * sin(2*pi*x))^2));
-	real errS = sqrt(int1d(Ths)((sh - Binv(Phi(M1)))^2));
+	// The discretisation errors
+	real errU = sqrt(int2d(Thb)((uh - u1)^2 + (grad(uh) - [dxu, dyu]) '* (grad(uh) - [dxu, dyu])));
+	real errV = sqrt(int1d(Ths)((vh - v1)^2));
+	real errW = sqrt(int1d(Ths)((dx(wh) - pi * Phiprime(v1) * sin(2*pi*x))^2));
+	real errS = sqrt(int1d(Ths)((sh - Binv(Phi(v1)))^2));
 	cout << Thb.hmax << " " << errU << " " << errV << " " << errW << " " << errS << endl;
 }
